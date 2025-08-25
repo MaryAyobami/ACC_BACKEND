@@ -1848,11 +1848,11 @@ const checkLivestockAccess = (userRole, operation) => {
     'Admin': ['view', 'create', 'update', 'delete'],
     'Farm Manager': ['view', 'create', 'update', 'delete'],
     'Veterinary Doctor': ['view', 'update'],
-    'Pasture Manager': ['view'],
+    'Pasture Officer': ['view'],
     'Staff': ['view'],
     'Farm Attendant': ['view'],
     'Maintenance Officer': ['view'],
-    'Field Production Officer': ['view']
+    'Feed Production Officer': ['view']
   }
   
   return permissions[userRole]?.includes(operation) || false
@@ -1864,11 +1864,11 @@ const checkTaskAccess = (userRole, operation) => {
     'Admin': ['view', 'create', 'update', 'delete'],
     'Farm Manager': ['view', 'create', 'update', 'delete'],
     'Veterinary Doctor': ['view'],
-    'Pasture Manager': ['view'],
+    'Pasture Officer': ['view'],
     'Staff': ['view'],
     'Farm Attendant': ['view'],
     'Maintenance Officer': ['view'],
-    'Field Production Officer': ['view']
+    'Feed Production Officer': ['view']
   }
   
   return permissions[userRole]?.includes(operation) || false
