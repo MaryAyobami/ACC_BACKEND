@@ -206,7 +206,7 @@ class SimpleNotifications {
     static async sendTaskReminder(user, task, timeLeft) {
         try {
             const html = `
-                <h2>⏰ Task Reminder</h2>
+                <h2>Task Reminder</h2>
                 <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107;">
                     <h3>${task.title}</h3>
                     <p><strong>Due in: ${timeLeft}</strong></p>
@@ -215,7 +215,7 @@ class SimpleNotifications {
                 </div>
             `;
             await sendPushToUser(user.id, {
-            title: "🌅 Good Morning!",
+            title: "Good Morning!",
             body: `You have ${tasks.length} tasks today.`,
             icon: "/public/android-chrome-192x192.png"
         })
@@ -235,7 +235,7 @@ class SimpleNotifications {
     static async sendUrgentReminder(user, task) {
         try {
             const html = `
-                <h2 style="color: red;">🚨 URGENT: Task Due Soon!</h2>
+                <h2 style="color: red;">URGENT: Task Due Soon!</h2>
                 <div style="background: #f8d7da; padding: 15px; border-left: 4px solid #dc3545;">
                     <h3>${task.title}</h3>
                     <p><strong>Due in 15 minutes!</strong></p>
@@ -256,28 +256,33 @@ class SimpleNotifications {
     }
 
     // Overdue alert
-    static async sendOverdueAlert(user, task) {
-        try {
-            const html = `
-                <h2 style="color: red;">⚠️ Overdue Task</h2>
-                <div style="background: #f8d7da; padding: 15px; border-left: 4px solid #dc3545;">
-                    <h3>${task.title}</h3>
-                    <p><strong>This task is overdue!</strong></p>
-                    <p>Was due: ${new Date(task.due_date).toLocaleString()}</p>
-                </div>
-            `;
+static async sendOverdueAlert(user, task) {
+    try {
+        const html = `
+            <h2 style="color: red;">Overdue Task</h2>
+            <div style="background: #f8d7da; padding: 15px; border-left: 4px solid #dc3545;">
+                <h3>${task.title}</h3>
+                <p><strong>This task is overdue!</strong></p>
+                <p>Was due: ${new Date(task.due_date).toLocaleString()}</p>
+            </div>
+        `;
 
-            await emailer.sendMail({
-                from: process.env.EMAIL_USER || 'ogunmolamaryayobami@gmail.com',
-                to: user.email,
-                subject: `⚠️ Overdue: ${task.title}`,
-                html: html
-            });
-            
-        } catch (error) {
-            console.error('❌ Error sending overdue alert:', error);
-        }
+        await emailer.sendMail({
+            from: process.env.EMAIL_USER || 'ogunmolamaryayobami@gmail.com',
+            to: user.email,
+            subject: `⚠️ Overdue: ${task.title}`,
+            html: html
+        });
+
+        // Mark this task as notified
+        await pool.query(
+            'UPDATE tasks SET overdue_notified = TRUE WHERE id = $1',
+            [task.id]
+        );
+    } catch (error) {
+        console.error('❌ Error sending overdue alert:', error);
     }
+}
 
     // Send verification email
     static async sendVerificationEmail(user, token) {
@@ -606,10 +611,11 @@ class SimpleNotifications {
     static async getOverdueTasks() {
         try {
             const result = await pool.query(`
-                SELECT * FROM tasks 
+                   SELECT * FROM tasks 
                 WHERE due_date < NOW() 
                 AND status != 'completed'
-                ORDER BY due_date ASC
+                AND (overdue_notified IS NULL OR overdue_notified = FALSE)
+            ORDER BY due_date ASC
             `);
             return result.rows;
         } catch (error) {
