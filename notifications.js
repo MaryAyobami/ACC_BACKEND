@@ -2,7 +2,9 @@ const nodemailer = require('nodemailer');
 const cron = require('node-cron');
 
 const { sendPushToUser } = require('./push')
-const pool = require('./pool')
+const { pool, queryWithRetry } = require("./pool");
+
+
 require("dotenv").config()
 
 

@@ -3,10 +3,10 @@ const express = require("express")
 const cors = require("cors")
 const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
-const pool = require('./pool')
 const multer = require("multer")
 const cron = require("node-cron") 
 const cloudinary = require('cloudinary').v2
+const { pool, queryWithRetry } = require("./pool");
 
 require("dotenv").config()
 

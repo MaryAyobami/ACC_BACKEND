@@ -1,6 +1,7 @@
 const webpush = require('web-push')
 require('dotenv').config()
-const pool = require('./pool')
+const { pool, queryWithRetry } = require("./pool");
+
 
 // Configure web-push
 webpush.setVapidDetails(
