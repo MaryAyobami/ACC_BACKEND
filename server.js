@@ -3,7 +3,7 @@ const express = require("express")
 const cors = require("cors")
 const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
-const { Pool } = require("pg")
+const pool = require('./pool')
 const multer = require("multer")
 const cron = require("node-cron") 
 const cloudinary = require('cloudinary').v2
@@ -72,52 +72,6 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-// Database connection with better error handling and reconnection
-const pool = new Pool({
-  connectionString: "postgresql://postgres.nobbtyhwmjgfeiwpcduk:bams060704@aws-0-eu-north-1.pooler.supabase.com:5432/postgres",
-  ssl: {
-    rejectUnauthorized: false,
-  },
-  // Connection pool settings
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
-  maxUses: 7500, // Close (and replace) a connection after it has been used 7500 times
-})
-
-// Handle pool errors
-pool.on('error', (err, client) => {
-  console.error('Unexpected error on idle client', err)
-  // Don't exit the process, just log the error
-})
-
-// Test database connection with retry logic
-const connectWithRetry = async () => {
-  const maxRetries = 5;
-  let retries = 0;
-  
-  while (retries < maxRetries) {
-    try {
-      const client = await pool.connect();
-      client.release();
-      return;
-    } catch (err) {
-      retries++;
-      console.error(`Database connection attempt ${retries} failed:`, err.message);
-      
-      if (retries === maxRetries) {
-        console.error('Max database connection retries reached. Server will continue but database operations may fail.');
-        return; // Don't exit, let server start
-      }
-      
-      // Wait before retrying (exponential backoff)
-      await new Promise(resolve => setTimeout(resolve, Math.pow(2, retries) * 1000));
-    }
-  }
-}
-
-// Connect to database
-connectWithRetry();
 
 
 // Use memoryStorage for multer (for Cloudinary)

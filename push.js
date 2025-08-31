@@ -1,6 +1,6 @@
 const webpush = require('web-push')
 require('dotenv').config()
-const { pool } = require('./db')
+const pool = require('./pool')
 
 // Configure web-push
 webpush.setVapidDetails(
