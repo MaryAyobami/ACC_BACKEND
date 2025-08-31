@@ -1,3 +1,4 @@
+
 const express = require("express")
 const cors = require("cors")
 const bcrypt = require("bcrypt")
@@ -10,6 +11,11 @@ const cloudinary = require('cloudinary').v2
 require("dotenv").config()
 
 const { saveSubscription } = require('./push')
+// ...existing imports and setup...
+// ...existing code...
+// Initialize Express app
+const app = express()
+const port = process.env.PORT || 5000
 
 // Import notifications only if the file exists
 let notificationSystem = null;
@@ -20,8 +26,29 @@ try {
   console.warn('Notifications module not found, continuing without it');
 }
 
-const app = express()
-const port = process.env.PORT || 5000
+// Email sending function
+const sendNotificationEmail = async (mailOptions) => {
+  try {
+    if (notificationSystem?.emailer) {
+      await notificationSystem.emailer.sendMail(mailOptions);
+    } else {
+      // Fallback: create emailer directly
+      const nodemailer = require('nodemailer');
+      const emailer = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.EMAIL_USER || 'ogunmolamaryayobami@gmail.com',
+          pass: process.env.EMAIL_APP
+      }});
+      await emailer.sendMail(mailOpti_PASSWORD || 'vglx evpx phmy rgmy');
+    }
+  } catch (error) {
+    console.error('Failed to send email:', error);
+    throw error;
+  }
+}
+
+
 
 // Enhanced error handling
 process.on('unhandledRejection', (reason, promise) => {
@@ -73,7 +100,6 @@ const connectWithRetry = async () => {
     try {
       const client = await pool.connect();
       client.release();
-      console.log('Database connected successfully');
       return;
     } catch (err) {
       retries++;
@@ -123,7 +149,6 @@ app.use(express.json())
 if (notificationSystem && notificationSystem.startNotifications) {
   try {
     notificationSystem.startNotifications();
-    console.log('Notification system started');
   } catch (err) {
     console.warn('Failed to start notification system:', err.message);
   }
@@ -338,7 +363,6 @@ app.post("/api/auth/register", async (req, res) => {
     if (notificationSystem) {
       try {
         await notificationSystem.SimpleNotifications.sendVerificationEmail(user, verificationToken)
-        console.log(`Verification email sent to ${email}`)
       } catch (emailError) {
         console.error('Failed to send verification email:', emailError)
         // Don't fail registration if email fails, but log it
@@ -428,7 +452,6 @@ app.post("/api/auth/send-verification", async (req, res) => {
     if (notificationSystem) {
       try {
         await notificationSystem.SimpleNotifications.sendVerificationEmail(user, verificationToken)
-        console.log(`Verification email resent to ${email}`)
       } catch (emailError) {
         console.error('Failed to send verification email:', emailError)
         return res.status(500).json({ 
@@ -436,7 +459,6 @@ app.post("/api/auth/send-verification", async (req, res) => {
         })
       }
     } else {
-      console.log(`Verification email would be sent to ${email} with token: ${verificationToken}`)
     }
     
     res.json({ 
@@ -501,7 +523,6 @@ app.post("/api/auth/verify-email", async (req, res) => {
       [user.id]
     )
     
-    console.log(`Email verified successfully for user: ${user.email}`)
     
     res.json({ 
       message: "Email verified successfully! You can now log in to your account.",
@@ -551,7 +572,6 @@ app.post("/api/auth/forgot-password", async (req, res) => {
         console.error('Failed to send password reset email:', emailError)
       }
     } else {
-      console.log(`Password reset link for ${email}: https://your-app.com/reset-password?token=${resetToken}`)
     }
 
     res.json({ message: "If an account with this email exists, a password reset link has been sent." })
@@ -606,19 +626,15 @@ app.get("/api/dashboard/stats", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id
     const userRole = req.user.role
-    console.log("User ID:", userId, "Role:", userRole)
     
     // Get today's tasks based on user role
     let todayTasksQuery
     let todayTasksParams
 
-    if (userRole === "Admin User") {
-      todayTasksQuery = "SELECT * FROM tasks WHERE due_date = CURRENT_DATE"
-      todayTasksParams = []
-    } else {
-      todayTasksQuery = "SELECT * FROM tasks WHERE assigned_to = $1 AND due_date = CURRENT_DATE"
-      todayTasksParams = [userId]
-    }
+    
+    todayTasksQuery = "SELECT * FROM tasks WHERE assigned_to = $1 AND due_date = CURRENT_DATE"
+    todayTasksParams = [userId]
+    
 
     const todayTasksResult = await pool.query(todayTasksQuery, todayTasksParams)
     const todayTasks = todayTasksResult.rows
@@ -631,22 +647,17 @@ app.get("/api/dashboard/stats", authenticateToken, async (req, res) => {
     let weekTasksQuery
     let weekTasksParams
 
-    if (userRole === "Admin User") {
-      weekTasksQuery = `
-        SELECT COUNT(*) as count FROM tasks 
-        WHERE due_date >= DATE_TRUNC('week', CURRENT_DATE) 
-        AND due_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days'
-      `
-      weekTasksParams = []
-    } else {
-      weekTasksQuery = `
-        SELECT COUNT(*) as count FROM tasks 
-        WHERE assigned_to = $1 
-        AND due_date >= DATE_TRUNC('week', CURRENT_DATE) 
-        AND due_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days'
-      `
-      weekTasksParams = [userId]
-    }
+   weekTasksQuery = `
+  SELECT COUNT(*) as count FROM tasks
+  WHERE assigned_to = $1
+    AND (
+      (tag = 'static' AND recurrent = true AND due_date >= DATE_TRUNC('week', CURRENT_DATE) AND due_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days')
+      OR
+      (tag = 'dynamic' AND active_date >= DATE_TRUNC('week', CURRENT_DATE) AND active_date < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days')
+    )
+`
+    weekTasksParams = [userId]
+    
 
     const weekTasksResult = await pool.query(weekTasksQuery, weekTasksParams)
     const thisWeekTasks = Number.parseInt(weekTasksResult.rows[0].count)
@@ -674,33 +685,23 @@ app.get("/api/dashboard/stats", authenticateToken, async (req, res) => {
 app.get("/api/dashboard/tasks", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id
-    const userRole = req.user.role
-
     let query
     let params
 
-    if (userRole === "Admin User") {
+  
       query = `
-        SELECT t.*, u.full_name as assigned_name 
-        FROM tasks t 
-        LEFT JOIN users u ON t.assigned_to = u.id 
-        WHERE t.due_date = CURRENT_DATE 
-        ORDER BY t.due_time ASC NULLS LAST
-      `
-      params = []
-    } else {
-      query = `
-        SELECT t.*, u.full_name as assigned_name 
-        FROM tasks t 
-        LEFT JOIN users u ON t.assigned_to = u.id 
-        WHERE t.assigned_to = $1 AND t.due_date = CURRENT_DATE 
-        ORDER BY t.due_time ASC NULLS LAST
-      `
+      SELECT *
+      FROM tasks 
+      WHERE assigned_to = $1 AND (
+        (tag = 'static' AND recurrent = true)
+        OR
+        (tag = 'dynamic' AND active_date = CURRENT_DATE)
+      )
+      ORDER BY due_time ASC NULLS LAST
+    `
       params = [userId]
-    }
 
     const result = await pool.query(query, params)
-
     // Group tasks by time of day - with better null handling
     const morningTasks = result.rows.filter((task) => {
       if (!task.due_time) return false;
@@ -735,15 +736,35 @@ app.get("/api/dashboard/tasks", authenticateToken, async (req, res) => {
 // --- Scheduled job to reset static tasks' status daily ---
 cron.schedule("0 0 * * *", async () => {
   try {
-    // Reset status of static, recurrent tasks to 'pending' for today
+    // 1. Archive completed/missed static recurring tasks to task_history
     await pool.query(`
-      UPDATE tasks
-      SET status = 'pending'
+      INSERT INTO task_history (
+        original_task_id, title, description, assigned_to, completion_date, completed_at, status, evidence_photo, completion_notes, priority, due_date, due_time
+      )
+      SELECT id, title, description, assigned_to, completed_at::date, completed_at, status, evidence_photo, completion_notes, priority, due_date, due_time
+      FROM tasks
+      WHERE tag = 'static' AND recurrent = true AND (status = 'completed' OR (due_date < CURRENT_DATE AND status != 'completed'))
+    `);
+
+    // 2. Archive overdue dynamic tasks to task_history and delete from tasks
+    await pool.query(`
+      INSERT INTO task_history (
+        original_task_id, title, description, assigned_to, completion_date, completed_at, status, evidence_photo, completion_notes, priority, due_date, due_time
+      )
+      SELECT id, title, description, assigned_to, NULL, NULL, 'missed', evidence_photo, completion_notes, priority, due_date, due_time
+      FROM tasks
+      WHERE tag = 'dynamic' AND due_date < CURRENT_DATE AND status != 'completed'
+    `);
+    await pool.query(`
+      DELETE FROM tasks WHERE tag = 'dynamic' AND due_date < CURRENT_DATE AND status != 'completed'`);
+
+    // 3. Reset static recurring tasks to 'pending'
+    await pool.query(`
+      UPDATE tasks SET status = 'pending', completed_at = NULL, evidence_photo = NULL, completion_notes = NULL
       WHERE tag = 'static' AND recurrent = true
-    `)
-    console.log("Static tasks reset to pending for today")
+    `);
   } catch (err) {
-    console.error("Error resetting static tasks:", err)
+    console.error('Cron job error:', err);
   }
 })
 
@@ -941,11 +962,13 @@ app.get("/api/tasks", authenticateToken, async (req, res) => {
     // Only fetch tasks for today:
     // - Static tasks (tag='static', recurrent=true)
     // - Dynamic tasks (tag='dynamic', active_date=today)
-    if (userRole === "Admin User") {
+    // Admin and Farm Manager can see all tasks, others only see their own
+    if (["Admin", "Farm Manager", "Admin User"].includes(userRole)) {
       query = `
-        SELECT t.*, u.full_name as assigned_name 
+        SELECT t.*, u.full_name as assigned_name, c.full_name as created_by_name
         FROM tasks t 
         LEFT JOIN users u ON t.assigned_to = u.id 
+        LEFT JOIN users c ON t.created_by = c.id
         WHERE 
           (t.tag = 'static' AND t.recurrent = true)
           OR
@@ -976,27 +999,257 @@ app.get("/api/tasks", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Server error" })
   }
   })
+// ...existing code...
+// --- New: Get all task history for current user ---
+app.get("/api/task-history", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    let query, params;
+    if (["Admin", "Farm Manager", "Admin User"].includes(userRole)) {
+      query = `
+        SELECT h.*, u.full_name as assigned_name
+        FROM task_history h
+        LEFT JOIN users u ON h.assigned_to = u.id
+        ORDER BY h.archived_at DESC
+      `;
+      params = [];
+    } else {
+      query = `
+        SELECT h.*, u.full_name as assigned_name
+        FROM task_history h
+        LEFT JOIN users u ON h.assigned_to = u.id
+        WHERE h.assigned_to = $1
+        ORDER BY h.archived_at DESC
+      `;
+      params = [userId];
+    }
+    const result = await pool.query(query, params);
+    res.json({ data: result.rows });
+  } catch (error) {
+    console.error("Get task history error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// --- New: Get task history stats for current user ---
+app.get("/api/task-history/stats", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    let query, params;
+    if (["Admin", "Farm Manager", "Admin User"].includes(userRole)) {
+      query = `
+        SELECT status, COUNT(*) as count
+        FROM task_history
+        GROUP BY status
+      `;
+      params = [];
+    } else {
+      query = `
+        SELECT status, COUNT(*) as count
+        FROM task_history
+        WHERE assigned_to = $1
+        GROUP BY status
+      `;
+      params = [userId];
+    }
+    const result = await pool.query(query, params);
+    res.json({ stats: result.rows });
+  } catch (error) {
+    console.error("Get task history stats error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 // Complete task with evidence upload
-app.post("/api/tasks/:id/complete-with-evidence", authenticateToken, async (req, res) => {
+app.post("/api/tasks/:id/complete-with-evidence", authenticateToken, upload.single("evidence"), async (req, res) => {
   try {
-      if (!req.file) return res.status(400).json({ message: "No image provided" })
+    const taskId = req.params.id;
+    const { notes, completedAt } = req.body;
+    const completionTime = completedAt || new Date().toISOString();
 
-    // Upload to Cloudinary using buffer
-    cloudinary.uploader.upload_stream(
-      { resource_type: "image", folder: "evidence" },
-      async (error, cloudRes) => {
-        if (error) return res.status(500).json({ message: "Cloudinary upload failed" })
-        // Save cloudRes.secure_url to DB
-        await pool.query(
-          "UPDATE tasks SET status='completed', evidence_photo=$1 WHERE id=$2",
-          [cloudRes.secure_url, req.params.id]
-        )
-        res.json({ message: "Task completed with evidence", url: cloudRes.secure_url })
+    // Get the task type
+    const taskResult = await pool.query("SELECT * FROM tasks WHERE id = $1", [taskId]);
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    const task = taskResult.rows[0];
+
+    // Helper to archive to history
+    const archiveToHistory = async (evidencePhotoUrl) => {
+      await pool.query(
+        `INSERT INTO task_history (
+          original_task_id, title, description, assigned_to, completion_date, completed_at, status, evidence_photo, completion_notes, priority, due_date, due_time
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          task.id,
+          task.title,
+          task.description,
+          task.assigned_to,
+          completionTime ? completionTime.split('T')[0] : null,
+          completionTime,
+          'completed',
+          evidencePhotoUrl || task.evidence_photo,
+          notes || null,
+          task.priority,
+          task.due_date,
+          task.due_time
+        ]
+      );
+    };
+
+    if (task.tag === 'dynamic') {
+      // Dynamic: archive and delete
+      let evidencePhotoUrl = task.evidence_photo;
+      if (req.file) {
+        // Upload to Cloudinary
+        cloudinary.uploader.upload_stream(
+          { resource_type: "image", folder: "evidence" },
+          async (error, cloudRes) => {
+            if (error) {
+              console.error("Cloudinary upload error:", error);
+              return res.status(500).json({ message: "Image upload failed" });
+            }
+            evidencePhotoUrl = cloudRes.secure_url;
+            await archiveToHistory(evidencePhotoUrl);
+            await pool.query("DELETE FROM tasks WHERE id = $1", [taskId]);
+            res.json({ message: "Dynamic task completed and archived", evidence_url: evidencePhotoUrl, completed_at: completionTime });
+          }
+        ).end(req.file.buffer);
+      } else {
+        await archiveToHistory(evidencePhotoUrl);
+        await pool.query("DELETE FROM tasks WHERE id = $1", [taskId]);
+        res.json({ message: "Dynamic task completed and archived", completed_at: completionTime });
       }
-    ).end(req.file.buffer)  
+    } else {
+      // Static: just mark as completed
+      if (req.file) {
+        cloudinary.uploader.upload_stream(
+          { resource_type: "image", folder: "evidence" },
+          async (error, cloudRes) => {
+            if (error) {
+              console.error("Cloudinary upload error:", error);
+              return res.status(500).json({ message: "Image upload failed" });
+            }
+            await pool.query(
+              "UPDATE tasks SET status = 'completed', evidence_photo = $1, completion_notes = $2, completed_at = $3 WHERE id = $4",
+              [cloudRes.secure_url, notes || null, completionTime, taskId]
+            );
+            res.json({ message: "Static task completed with evidence", evidence_url: cloudRes.secure_url, completed_at: completionTime });
+          }
+        ).end(req.file.buffer);
+      } else {
+        await pool.query(
+          "UPDATE tasks SET status = 'completed', completion_notes = $1, completed_at = $2 WHERE id = $3",
+          [notes || null, completionTime, taskId]
+        );
+        res.json({ message: "Static task completed", completed_at: completionTime });
+      }
+    }
   } catch (error) {
-    res.status(500).json({ message: "Server error" })
+    console.error("Complete task error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+})
+
+// Send reminder for a task
+app.post("/api/tasks/:id/remind", authenticateToken, async (req, res) => {
+  try {
+    const taskId = req.params.id
+    const { assignedUserId } = req.body
+
+    // Get task and user details
+    const taskQuery = `
+      SELECT t.*, u.full_name as assigned_name, u.email as assigned_email,
+             c.full_name as created_by_name
+      FROM tasks t 
+      LEFT JOIN users u ON t.assigned_to = u.id 
+      LEFT JOIN users c ON t.created_by = c.id
+      WHERE t.id = $1
+    `
+    const taskResult = await pool.query(taskQuery, [taskId])
+    
+    if (taskResult.rows.length === 0) {
+      return res.status(404).json({ message: "Task not found" })
+    }
+
+    const task = taskResult.rows[0]
+    
+    if (!task.assigned_email) {
+      return res.status(400).json({ message: "No email found for assigned user" })
+    }
+
+    // Send reminder email
+    const reminderEmail = {
+      from: process.env.EMAIL_FROM || 'noreply@farmconnect.com',
+      to: task.assigned_email,
+      subject: `Reminder: Task "${task.title}" is pending`,
+      html: `
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif; background-color: #f9f9f9;">
+          <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 30px; text-align: center; color: white; border-radius: 10px 10px 0 0;">
+            <h1 style="margin: 0; font-size: 24px;">Alliance CropCraft</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">Task Reminder</p>
+          </div>
+          
+          <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="color: #374151; margin-bottom: 20px;">Hello ${task.assigned_name}!</h2>
+            
+            <p style="color: #6b7280; line-height: 1.6; margin-bottom: 20px;">
+              This is a friendly reminder about your pending task that requires your attention.
+            </p>
+            
+            <div style="background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%); padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f59e0b;">
+              <h4 style="margin: 0 0 10px 0; color: #92400e;">📋 ${task.title}</h4>
+              <p style="margin: 0; color: #92400e; font-size: 14px;">${task.description || 'No description provided'}</p>
+            </div>
+            
+            <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <div style="display: grid; gap: 10px;">
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: #6b7280; font-weight: 500;">Due Date:</span>
+                  <span style="color: #374151;">${task.due_date || 'Not specified'}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: #6b7280; font-weight: 500;">Due Time:</span>
+                  <span style="color: #374151;">${task.due_time || 'Not specified'}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: #6b7280; font-weight: 500;">Priority:</span>
+                  <span style="color: ${task.priority === 'high' ? '#dc2626' : task.priority === 'medium' ? '#d97706' : '#059669'}; font-weight: bold;">${task.priority?.toUpperCase()}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <p style="color: #6b7280; margin-bottom: 20px;">Please complete this task at your earliest convenience.</p>
+            </div>
+            
+            <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+              <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                This is an automated reminder from Alliance CropCraft.<br>
+                If you have any questions, please contact your farm manager.
+              </p>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px;">
+              <p style="color: #6b7280; font-size: 14px; margin: 0;">
+                Best regards,<br>
+                <strong style="color: #10b981;">${task.created_by_name || 'The Alliance CropCraft Team'}</strong>
+              </p>
+            </div>
+          </div>
+        </div>
+      `
+    }
+
+    await sendNotificationEmail(reminderEmail)
+    
+    res.json({ message: "Reminder sent successfully" })
+  } catch (error) {
+    console.error("Send reminder error:", error)
+    res.status(500).json({ message: "Failed to send reminder" })
   }
 })
 
@@ -1010,11 +1263,12 @@ app.get("/api/tasks/history/weekly", authenticateToken, async (req, res) => {
     let params
 
     // Get tasks for the current week (Monday to Sunday)
-    if (userRole === "Admin User") {
+    if (["Admin", "Farm Manager", "Admin User"].includes(userRole)) {
       query = `
-        SELECT t.*, u.full_name as assigned_name 
+        SELECT t.*, u.full_name as assigned_name, c.full_name as created_by_name
         FROM tasks t 
         LEFT JOIN users u ON t.assigned_to = u.id 
+        LEFT JOIN users c ON t.created_by = c.id
         WHERE 
           (t.tag = 'static' AND t.recurrent = true)
           OR
@@ -1071,11 +1325,12 @@ app.get("/api/tasks/history/:week", authenticateToken, async (req, res) => {
       endDate = `date_trunc('week', to_date('${year}-01-01', 'YYYY-MM-DD') + (${weekNum} - 1) * interval '7 days') + interval '7 days'`
     }
 
-    if (userRole === "Admin User") {
+    if (["Admin", "Farm Manager", "Admin User"].includes(userRole)) {
       query = `
-        SELECT t.*, u.full_name as assigned_name 
+        SELECT t.*, u.full_name as assigned_name, c.full_name as created_by_name
         FROM tasks t 
         LEFT JOIN users u ON t.assigned_to = u.id 
+        LEFT JOIN users c ON t.created_by = c.id
         WHERE 
           (t.tag = 'static' AND t.recurrent = true)
           OR
@@ -1119,7 +1374,7 @@ app.get("/api/tasks/:id/details", authenticateToken, async (req, res) => {
       FROM tasks t 
       LEFT JOIN users u ON t.assigned_to = u.id 
       LEFT JOIN users c ON t.created_by = c.id
-      WHERE t.id = $1 AND (t.assigned_to = $2 OR $3 = 'Admin User' OR t.created_by = $2)
+      WHERE t.id = $1 AND (t.assigned_to = $2 OR $3 = 'Admin' OR $3 = 'Farm Manager' OR t.created_by = $2)
     `
     
     const result = await pool.query(query, [taskId, req.user.id, req.user.role])
@@ -1134,7 +1389,6 @@ app.get("/api/tasks/:id/details", authenticateToken, async (req, res) => {
     if (task.evidence_photo) {
       task.evidence_photo_url = `${req.protocol}://${req.get('host')}/uploads/evidence/${task.evidence_photo}`
     }
-
     res.json({ data: task })
   } catch (error) {
     console.error("Get task details error:", error)
@@ -1224,7 +1478,7 @@ app.put("/api/tasks/:id", authenticateToken, async (req, res) => {
         active_date = $9,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $10 RETURNING *`,
-      [title, description, due_date, due_time, assigned_to, priority || 'medium', tag || 'static', recurrent !== false, active_date, taskId]
+      [title, description, due_date, due_time, assigned_to, priority || 'medium', tag || 'static', recurrent !== false, active_date || null, taskId]
     )
 
     if (result.rows.length === 0) {
@@ -1272,7 +1526,7 @@ app.get("/api/events", authenticateToken, async (req, res) => {
 
 app.post("/api/events", authenticateToken, async (req, res) => {
   try {
-    const { title, description, event_date, event_time, location, type, priority } = req.body
+    const { title, description, event_date, event_time, location, type, priority, participants } = req.body
     const created_by = req.user.id
 
     // Enhanced validation
@@ -1331,9 +1585,9 @@ app.post("/api/events", authenticateToken, async (req, res) => {
       })
     }
 
-    if (type && !["Task", "Meeting", "Appointment", "Reminder", "Other"].includes(type)) {
+    if (type && !["meeting", "event"].includes(type.toLowerCase())) {
       return res.status(400).json({ 
-        message: "Event type must be one of: Task, Meeting, Appointment, Reminder, Other",
+        message: "Event type must be either 'meeting' or 'event'",
         field: "type"
       })
     }
@@ -1356,23 +1610,152 @@ app.post("/api/events", authenticateToken, async (req, res) => {
       }
     }
 
-    const result = await queryWithRetry(
-      `INSERT INTO events 
-       (title, description, event_date, event_time, location, type, priority, created_by, created_at) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING *`,
-      [
-        title.trim(),
-        description ? description.trim() : null,
-        event_date,
-        event_time || null,
-        location ? location.trim() : null,
-        type || "Task",
-        priority ? priority.toLowerCase() : "medium",
-        created_by
-      ],
-    )
+    // Validate participant emails if provided
+    let participantEmails = []
+    if (participants && participants.trim()) {
+      participantEmails = participants.split(',').map(email => email.trim()).filter(email => email)
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      const invalidEmails = participantEmails.filter(email => !emailRegex.test(email))
+      
+      if (invalidEmails.length > 0) {
+        return res.status(400).json({ 
+          message: `Invalid email(s): ${invalidEmails.join(', ')}`,
+          field: "participants"
+        })
+      }
+    }
+
+    // Try to insert with participants column, fallback if column doesn't exist
+    let result
+    try {
+      result = await queryWithRetry(
+        `INSERT INTO events 
+         (title, description, event_date, event_time, location, type, priority, created_by, participants, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) RETURNING *`,
+        [
+          title.trim(),
+          description ? description.trim() : null,
+          event_date,
+          event_time || null,
+          location ? location.trim() : null,
+          type || "meeting",
+          priority ? priority.toLowerCase() : "medium",
+          created_by,
+          participantEmails.length > 0 ? participantEmails.join(',') : null
+        ],
+      )
+    } catch (columnError) {
+      // If participants column doesn't exist, insert without it
+      if (columnError.message?.includes('participants')) {
+        result = await queryWithRetry(
+          `INSERT INTO events 
+           (title, description, event_date, event_time, location, type, priority, created_by, created_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING *`,
+          [
+            title.trim(),
+            description ? description.trim() : null,
+            event_date,
+            event_time || null,
+            location ? location.trim() : null,
+            type || "meeting",
+            priority ? priority.toLowerCase() : "medium",
+            created_by
+          ],
+        )
+      } else {
+        throw columnError
+      }
+    }
 
     const createdEvent = result.rows[0]
+
+    // Send invitations to participants
+    if (participantEmails.length > 0) {
+      try {
+        const createdByUser = await queryWithRetry("SELECT * FROM users WHERE id = $1", [created_by])
+        const creatorName = createdByUser.rows.length > 0 ? createdByUser.rows[0].full_name : 'Event Organizer'
+        
+        for (const email of participantEmails) {
+          const invitationEmail = {
+            from: process.env.EMAIL_FROM || 'noreply@farmconnect.com',
+            to: email,
+            subject: `Event Invitation: ${title}`,
+            html: `
+              <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif; background-color: #f9f9f9;">
+                <div style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); padding: 30px; text-align: center; color: white; border-radius: 10px 10px 0 0;">
+                  <h1 style="margin: 0; font-size: 24px;">Alliance CropCraft</h1>
+                  <p style="margin: 10px 0 0 0; opacity: 0.9;">🎉 Event Invitation</p>
+                </div>
+                
+                <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                  <h2 style="color: #374151; margin-bottom: 20px;">You're Invited!</h2>
+                  
+                  <p style="color: #6b7280; line-height: 1.6; margin-bottom: 20px;">
+                    Hello! You have been invited to the following event by <strong style="color: #3b82f6;">${creatorName}</strong>:
+                  </p>
+                  
+                  <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3b82f6;">
+                    <h4 style="margin: 0 0 15px 0; color: #1e40af;">📅 ${title}</h4>
+                    ${description ? `<p style="margin: 0 0 15px 0; color: #1e40af; font-size: 14px;">${description}</p>` : ''}
+                  </div>
+                  
+                  <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <div style="display: grid; gap: 10px;">
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6b7280; font-weight: 500;">📅 Date:</span>
+                        <span style="color: #374151;">${event_date}</span>
+                      </div>
+                      ${event_time ? `
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6b7280; font-weight: 500;">⏰ Time:</span>
+                        <span style="color: #374151;">${event_time}</span>
+                      </div>` : ''}
+                      ${location ? `
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6b7280; font-weight: 500;">📍 Location:</span>
+                        <span style="color: #374151;">${location}</span>
+                      </div>` : ''}
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6b7280; font-weight: 500;">🏷️ Type:</span>
+                        <span style="color: #374151;">${type || 'Event'}</span>
+                      </div>
+                      <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #6b7280; font-weight: 500;">⭐ Priority:</span>
+                        <span style="color: ${priority === 'high' ? '#dc2626' : priority === 'medium' ? '#d97706' : '#059669'}; font-weight: bold;">${(priority || 'medium').toUpperCase()}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style="text-align: center; margin: 30px 0;">
+                    <p style="color: #6b7280; margin-bottom: 20px;">This event has been added to your calendar. Please save the date!</p>
+                  </div>
+                  
+                  <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+                    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                      This invitation was sent from Alliance CropCraft.<br>
+                      If you have any questions about this event, please contact the organizer.
+                    </p>
+                  </div>
+                  
+                  <div style="text-align: center; margin-top: 20px;">
+                    <p style="color: #6b7280; font-size: 14px; margin: 0;">
+                      Best regards,<br>
+                      <strong style="color: #10b981;">${creatorName}</strong><br>
+                      <span style="color: #9ca3af; font-size: 12px;">Alliance CropCraft Team</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            `
+          }
+          
+          await sendNotificationEmail(invitationEmail)
+        }
+      } catch (inviteError) {
+        console.error("Failed to send invitation emails:", inviteError)
+        // Don't fail event creation if invitation emails fail
+      }
+    }
 
     // Send notification about the new event if notification system is available
     if (notificationSystem) {
@@ -1416,23 +1799,92 @@ app.post("/api/events", authenticateToken, async (req, res) => {
 app.put("/api/events/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params
-    const { title, description, event_date, event_time, location, type, priority } = req.body
+    const { title, description, event_date, event_time, location, type, priority, participants } = req.body
+    const userId = req.user.id
+    const userRole = req.user.role
 
-    const result = await pool.query(
-      `UPDATE events SET 
-        title = COALESCE($1, title),
-        description = COALESCE($2, description),
-        event_date = COALESCE($3, event_date),
-        event_time = COALESCE($4, event_time),
-        location = COALESCE($5, location),
-        type = COALESCE($6, type),
-        priority = COALESCE($7, priority)
-      WHERE id = $8 RETURNING *`,
-      [title || null, description || null, event_date || null, event_time || null, location || null, type || null, priority || null, id]
-    )
-
-    if (result.rows.length === 0) {
+    // Check if event exists and user has permission to edit
+    const eventCheck = await pool.query("SELECT * FROM events WHERE id = $1", [id])
+    if (eventCheck.rows.length === 0) {
       return res.status(404).json({ message: "Event not found" })
+    }
+
+    const event = eventCheck.rows[0]
+    // Only creator or admin/farm manager can edit
+    if (event.created_by !== userId && !["Admin", "Farm Manager"].includes(userRole)) {
+      return res.status(403).json({ message: "You don't have permission to edit this event" })
+    }
+
+    // Validate participant emails if provided
+    let participantEmails = []
+    if (participants !== undefined) {
+      if (participants && participants.trim()) {
+        participantEmails = participants.split(',').map(email => email.trim()).filter(email => email)
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        const invalidEmails = participantEmails.filter(email => !emailRegex.test(email))
+        
+        if (invalidEmails.length > 0) {
+          return res.status(400).json({ 
+            message: `Invalid email(s): ${invalidEmails.join(', ')}`,
+            field: "participants"
+          })
+        }
+      }
+    }
+
+    // Try to update with participants column, fallback if column doesn't exist
+    let result
+    try {
+      result = await pool.query(
+        `UPDATE events SET 
+          title = COALESCE($1, title),
+          description = COALESCE($2, description),
+          event_date = COALESCE($3, event_date),
+          event_time = COALESCE($4, event_time),
+          location = COALESCE($5, location),
+          type = COALESCE($6, type),
+          priority = COALESCE($7, priority),
+          participants = COALESCE($8, participants)
+        WHERE id = $9 RETURNING *`,
+        [
+          title || null, 
+          description || null, 
+          event_date || null, 
+          event_time || null, 
+          location || null, 
+          type || null, 
+          priority || null, 
+          participants !== undefined ? (participantEmails.length > 0 ? participantEmails.join(',') : null) : undefined,
+          id
+        ]
+      )
+    } catch (columnError) {
+      // If participants column doesn't exist, update without it
+      if (columnError.message?.includes('participants')) {
+        result = await pool.query(
+          `UPDATE events SET 
+            title = COALESCE($1, title),
+            description = COALESCE($2, description),
+            event_date = COALESCE($3, event_date),
+            event_time = COALESCE($4, event_time),
+            location = COALESCE($5, location),
+            type = COALESCE($6, type),
+            priority = COALESCE($7, priority)
+          WHERE id = $8 RETURNING *`,
+          [
+            title || null, 
+            description || null, 
+            event_date || null, 
+            event_time || null, 
+            location || null, 
+            type || null, 
+            priority || null, 
+            id
+          ]
+        )
+      } else {
+        throw columnError
+      }
     }
 
     res.json(result.rows[0])
@@ -1446,8 +1898,22 @@ app.put("/api/events/:id", authenticateToken, async (req, res) => {
 app.delete("/api/events/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params
+    const userId = req.user.id
+    const userRole = req.user.role
+
+    // Check if event exists and user has permission to delete
+    const eventCheck = await pool.query("SELECT * FROM events WHERE id = $1", [id])
+    if (eventCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Event not found" })
+    }
+
+    const event = eventCheck.rows[0]
+    // Only creator or admin/farm manager can delete
+    if (event.created_by !== userId && !["Admin", "Farm Manager"].includes(userRole)) {
+      return res.status(403).json({ message: "You don't have permission to delete this event" })
+    }
+
     const result = await pool.query("DELETE FROM events WHERE id = $1 RETURNING id", [id])
-    if (result.rows.length === 0) return res.status(404).json({ message: "Event not found" })
     res.json({ success: true })
   } catch (error) {
     console.error("Delete event error:", error)
@@ -1459,23 +1925,26 @@ app.delete("/api/events/:id", authenticateToken, async (req, res) => {
 app.get("/api/reports/stats", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { start, end } = req.query
-    let where = " WHERE created_at >= CURRENT_DATE - INTERVAL '7 days' "
-    let params = []
+    let where = "th.completed_at >= CURRENT_DATE - INTERVAL '7 days'";
+    let params = [];
     if (start && end) {
-      where = " WHERE created_at BETWEEN $1 AND $2 "
-      params = [start, end]
+      where = "th.completed_at BETWEEN $1 AND $2";
+      params = [start, end];
     }
 
-    // Task completion rate over range
+    // Use task_history for actual completed/archived tasks
     const completionResult = await pool.query(
       `SELECT 
         COUNT(*) as total_tasks,
-        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_tasks
-      FROM tasks ${where}`,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_tasks,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_tasks,
+        COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress_tasks,
+        COUNT(CASE WHEN status = 'overdue' THEN 1 END) as overdue_tasks
+      FROM task_history th WHERE ${where}`,
       params
     )
 
-    const { total_tasks, completed_tasks } = completionResult.rows[0]
+    const { total_tasks, completed_tasks, pending_tasks, in_progress_tasks, overdue_tasks } = completionResult.rows[0]
     const completionRate = total_tasks > 0 ? ((completed_tasks / total_tasks) * 100).toFixed(1) : 0
 
     // Get real livestock count (excluding deceased)
@@ -1484,24 +1953,22 @@ app.get("/api/reports/stats", authenticateToken, requireAdmin, async (req, res) 
     )
     const activeLivestock = Number.parseInt(livestockResult.rows[0].count)
 
-    // Calculate staff efficiency based on task completion rates
-    const staffEfficiencyResult = await pool.query(
-      `SELECT 
-        ROUND(AVG(CASE WHEN status = 'completed' THEN 100 ELSE 0 END), 1) as efficiency
-      FROM tasks 
-      WHERE assigned_to IS NOT NULL ${where.replace('created_at', 'due_date')}`,
-      params
-    )
+    // Calculate staff efficiency based on task completion rates in history
+    let staffEfficiencyWhere = "assigned_to IS NOT NULL";
+    const filter = where.replace("WHERE ", "").trim();
+    const staffEfficiencyQuery = filter
+      ? `SELECT ROUND(AVG(CASE WHEN status = 'completed' THEN 100 ELSE 0 END), 1) as efficiency FROM task_history th WHERE assigned_to IS NOT NULL AND ${filter}`
+      : `SELECT ROUND(AVG(CASE WHEN status = 'completed' THEN 100 ELSE 0 END), 1) as efficiency FROM task_history th WHERE assigned_to IS NOT NULL`;
+    const staffEfficiencyResult = await pool.query(staffEfficiencyQuery, params);
     const staffEfficiency = Number.parseFloat(staffEfficiencyResult.rows[0].efficiency) || 0
 
     // Calculate productivity score as monthly revenue placeholder
-    // This could be replaced with actual revenue data if available
     const productivityResult = await pool.query(
       `SELECT 
         COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
         COUNT(*) as total
-      FROM tasks 
-      WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'`
+      FROM task_history 
+      WHERE completed_at >= CURRENT_DATE - INTERVAL '30 days'`
     )
     const { completed: monthlyCompleted, total: monthlyTotal } = productivityResult.rows[0]
     const monthlyRevenue = monthlyTotal > 0 ? 
@@ -1509,6 +1976,11 @@ app.get("/api/reports/stats", authenticateToken, requireAdmin, async (req, res) 
 
     res.json({
       taskCompletionRate: Number.parseFloat(completionRate),
+      totalTasks: Number.parseInt(total_tasks),
+      completedTasks: Number.parseInt(completed_tasks),
+      pendingTasks: Number.parseInt(pending_tasks),
+      inProgressTasks: Number.parseInt(in_progress_tasks),
+      overdueTasks: Number.parseInt(overdue_tasks),
       activeLivestock,
       staffEfficiency,
       monthlyRevenue,
@@ -1525,29 +1997,218 @@ app.get("/api/reports/staff-performance", authenticateToken, requireAdmin, async
     let dateFilter = ""
     let params = []
     if (start && end) {
-      dateFilter = " AND t.created_at BETWEEN $1 AND $2 "
-      params = [start, end]
+        dateFilter = "th.completed_at BETWEEN $1 AND $2"
+        params = [start, end]
+      } else {
+        dateFilter = "th.completed_at >= CURRENT_DATE - INTERVAL '7 days'"
     }
 
-    const result = await pool.query(
-      `SELECT 
-        u.id,
-        u.full_name,
-        u.role,
-        COUNT(t.id) as tasks_completed,
-        ROUND(AVG(CASE WHEN t.status = 'completed' THEN 100 ELSE 0 END), 1) as efficiency
-      FROM users u
-      LEFT JOIN tasks t ON u.id = t.assigned_to ${dateFilter}
-      WHERE u.role != 'Admin User'
-      GROUP BY u.id, u.full_name, u.role
-      ORDER BY tasks_completed DESC
-      LIMIT 5`,
-      params
-    )
+      const result = await pool.query(
+        `SELECT 
+          u.id,
+          u.full_name,
+          u.role,
+          COUNT(th.id) as tasks_completed,
+          ROUND(AVG(CASE WHEN th.status = 'completed' THEN 100 ELSE 0 END), 1) as efficiency
+        FROM users u
+        LEFT JOIN task_history th ON u.id = th.assigned_to
+        WHERE u.role != 'Admin User' AND ${dateFilter}
+        GROUP BY u.id, u.full_name, u.role
+        ORDER BY tasks_completed DESC
+        LIMIT 5`,
+        params
+      )
 
     res.json(result.rows)
   } catch (error) {
     console.error("Staff performance error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Get task distribution by type/category
+app.get("/api/reports/task-distribution", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { start, end } = req.query
+    let dateFilter = ""
+    let params = []
+    if (start && end) {
+      dateFilter = " WHERE th.completed_at BETWEEN $1 AND $2 "
+      params = [start, end]
+    } else {
+      dateFilter = " WHERE th.completed_at >= CURRENT_DATE - INTERVAL '7 days' "
+    }
+
+      // Join with tasks to get the original tag
+      const result = await pool.query(
+        `SELECT 
+          COALESCE(t.tag, 'other') as category,
+          COUNT(*) as count,
+          ROUND((COUNT(*) * 100.0 / SUM(COUNT(*)) OVER()), 1) as percentage
+        FROM task_history th
+        LEFT JOIN tasks t ON th.original_task_id = t.id
+        ${dateFilter}
+        GROUP BY t.tag
+        ORDER BY count DESC`,
+        params
+      )
+
+    // If no data, return default structure
+    if (result.rows.length === 0) {
+      return res.json([
+        { category: 'feeding', count: 0, percentage: 0 },
+        { category: 'health', count: 0, percentage: 0 },
+        { category: 'maintenance', count: 0, percentage: 0 },
+        { category: 'cleaning', count: 0, percentage: 0 },
+        { category: 'other', count: 0, percentage: 0 }
+      ])
+    }
+
+    res.json(result.rows)
+  } catch (error) {
+    console.error("Task distribution error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Get AI insights based on real data
+app.get("/api/reports/insights", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const insights = []
+
+    // Performance insight based on completion rates
+    const performanceResult = await pool.query(`
+      SELECT 
+        u.full_name,
+        COUNT(t.id) as total_tasks,
+        COUNT(CASE WHEN t.status = 'completed' THEN 1 END) as completed_tasks,
+        ROUND(COUNT(CASE WHEN t.status = 'completed' THEN 1 END) * 100.0 / NULLIF(COUNT(t.id), 0), 1) as efficiency
+      FROM users u
+      LEFT JOIN tasks t ON u.id = t.assigned_to
+      WHERE u.role != 'Admin' AND t.created_at >= CURRENT_DATE - INTERVAL '7 days'
+      GROUP BY u.id, u.full_name
+      HAVING COUNT(t.id) > 0
+      ORDER BY efficiency DESC, completed_tasks DESC
+      LIMIT 1
+    `)
+
+    if (performanceResult.rows.length > 0) {
+      const topPerformer = performanceResult.rows[0]
+      insights.push({
+        type: 'performance',
+        category: 'Performance Highlight',
+        message: `${topPerformer.full_name} leads this week with ${topPerformer.efficiency}% efficiency, completing ${topPerformer.completed_tasks} out of ${topPerformer.total_tasks} tasks.`,
+        color: 'emerald'
+      })
+    }
+
+    // Task completion trend insight
+    const trendResult = await pool.query(`
+      SELECT 
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_this_week,
+        COUNT(CASE WHEN status = 'completed' AND created_at >= CURRENT_DATE - INTERVAL '14 days' AND created_at < CURRENT_DATE - INTERVAL '7 days' THEN 1 END) as completed_last_week
+      FROM tasks
+      WHERE created_at >= CURRENT_DATE - INTERVAL '14 days'
+    `)
+
+    if (trendResult.rows.length > 0) {
+      const trend = trendResult.rows[0]
+      const thisWeek = parseInt(trend.completed_this_week)
+      const lastWeek = parseInt(trend.completed_last_week)
+      
+      if (lastWeek > 0) {
+        const percentChange = ((thisWeek - lastWeek) / lastWeek * 100).toFixed(1)
+        const message = percentChange > 0 
+          ? `Task completion improved by ${percentChange}% this week with ${thisWeek} tasks completed.`
+          : `Task completion decreased by ${Math.abs(percentChange)}% this week. Consider reviewing task assignments.`
+        
+        insights.push({
+          type: 'trend',
+          category: percentChange > 0 ? 'Performance Highlight' : 'Attention Required',
+          message,
+          color: percentChange > 0 ? 'emerald' : 'orange'
+        })
+      }
+    }
+
+    // Overdue tasks insight
+    const overdueResult = await pool.query(`
+      SELECT COUNT(*) as overdue_count
+      FROM tasks
+      WHERE status != 'completed' AND due_date < CURRENT_DATE
+    `)
+
+    const overdueCount = parseInt(overdueResult.rows[0].overdue_count)
+    if (overdueCount > 0) {
+      insights.push({
+        type: 'overdue',
+        category: 'Attention Required',
+        message: `${overdueCount} task${overdueCount > 1 ? 's are' : ' is'} overdue and require${overdueCount === 1 ? 's' : ''} immediate attention.`,
+        color: 'orange'
+      })
+    }
+
+    // Time optimization insight based on completion patterns
+    const timeResult = await pool.query(`
+      SELECT 
+        EXTRACT(HOUR FROM created_at) as hour_created,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_count,
+        COUNT(*) as total_count,
+        ROUND(COUNT(CASE WHEN status = 'completed' THEN 1 END) * 100.0 / COUNT(*), 1) as completion_rate
+      FROM tasks
+      WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+      GROUP BY EXTRACT(HOUR FROM created_at)
+      HAVING COUNT(*) >= 5
+      ORDER BY completion_rate DESC
+      LIMIT 1
+    `)
+
+    if (timeResult.rows.length > 0) {
+      const bestTime = timeResult.rows[0]
+      const hour = parseInt(bestTime.hour_created)
+      const timeRange = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
+      
+      insights.push({
+        type: 'optimization',
+        category: 'Optimization Tip',
+        message: `Tasks created in the ${timeRange} (around ${hour}:00) show highest completion rates at ${bestTime.completion_rate}%. Consider scheduling important tasks during this time.`,
+        color: 'blue'
+      })
+    }
+
+    // If no insights generated, provide fallback
+    if (insights.length === 0) {
+      insights.push({
+        type: 'general',
+        category: 'System Status',
+        message: 'System is monitoring your farm operations. Complete more tasks to receive personalized insights.',
+        color: 'blue'
+      })
+    }
+
+    // Ensure we have exactly 3 insights
+    const defaultInsights = [
+      {
+        type: 'health',
+        category: 'Health Reminder',
+        message: 'Regular livestock health checks ensure optimal farm productivity and early disease detection.',
+        color: 'orange'
+      },
+      {
+        type: 'productivity',
+        category: 'Productivity Tip',
+        message: 'Consistent task completion builds momentum. Focus on completing smaller tasks first to build confidence.',
+        color: 'blue'
+      }
+    ]
+
+    while (insights.length < 3) {
+      insights.push(defaultInsights[insights.length - 1] || defaultInsights[0])
+    }
+
+    res.json(insights.slice(0, 3))
+  } catch (error) {
+    console.error("AI insights error:", error)
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -1563,12 +2224,12 @@ app.get('/api/reports/export', authenticateToken, requireAdmin, async (req, res)
       ["StaffEfficiency","91.2%"],
       ["MonthlyRevenue","$22.8k"],
     ]
-    if (start || end) {
-      lines.push(["Start", start || ""])
-      lines.push(["End", end || ""])
+    if (start && end) {
+      dateFilter = " WHERE th.completed_at BETWEEN $1 AND $2 "
+      params = [start, end]
+    } else {
+      dateFilter = " WHERE th.completed_at >= CURRENT_DATE - INTERVAL '7 days' "
     }
-    const csv = lines.map(r => r.join(',')).join('\n')
-    res.setHeader('Content-Type', 'text/csv')
     res.setHeader('Content-Disposition', 'attachment; filename=report.csv')
     res.send(csv)
   } catch (error) {
@@ -1580,7 +2241,7 @@ app.get('/api/reports/export', authenticateToken, requireAdmin, async (req, res)
 // Users routes
 app.get("/api/users", authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query("SELECT id, full_name, email, role, phone FROM users ORDER BY full_name")
+    const result = await pool.query("SELECT id, full_name, email, role, phone , created_at FROM users ORDER BY full_name")
     res.json(result.rows)
   } catch (error) {
     console.error("Get users error:", error)
@@ -1734,7 +2395,7 @@ app.put("/api/users/:id", authenticateToken, async (req, res) => {
 
     if (password) {
       const hashedPassword = await bcrypt.hash(password, 10)
-      updateFields.push(`password = $${paramIndex++}`)
+      updateFields.push(`password_hash = $${paramIndex++}`)
       values.push(hashedPassword)
     }
 
@@ -2372,10 +3033,8 @@ app.get('/health', (req, res) => {
 
 // Graceful shutdown handling
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
   try {
     await pool.end();
-    console.log('Database pool closed');
     process.exit(0);
   } catch (err) {
     console.error('Error during shutdown:', err);
@@ -2384,10 +3043,8 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
   try {
     await pool.end();
-    console.log('Database pool closed');
     process.exit(0);
   } catch (err) {
     console.error('Error during shutdown:', err);
@@ -2830,7 +3487,179 @@ app.delete("/api/farm-resources/:id", authenticateToken, async (req, res) => {
   }
 })
 
+// External Users API endpoints
+
+// Get all external users
+app.get("/api/external-users", authenticateToken, async (req, res) => {
+  try {
+    const result = await queryWithRetry("SELECT * FROM external_users ORDER BY full_name")
+    res.json(result.rows)
+  } catch (error) {
+    console.error("Fetch external users error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Get external users by role (for suppliers dropdown)
+app.get("/api/external-users/suppliers", authenticateToken, async (req, res) => {
+  try {
+    const result = await queryWithRetry(`
+      SELECT id, full_name, company_name, email, phone, specialization, rating
+      FROM external_users 
+      WHERE role = 'Supplier' 
+      ORDER BY rating DESC, full_name
+    `)
+    res.json(result.rows)
+  } catch (error) {
+    console.error("Fetch suppliers error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Create external user
+app.post("/api/external-users", authenticateToken, async (req, res) => {
+  try {
+    // Check permissions - only Admin and Farm Manager can create external users
+    if (!["Admin", "Farm Manager"].includes(req.user.role)) {
+      return res.status(403).json({ message: "You do not have permission to create external users" })
+    }
+
+    const {
+      full_name,
+      company_name,
+      email,
+      phone,
+      role,
+      address
+    } = req.body
+
+    // Validation
+    if (!full_name) {
+      return res.status(400).json({ message: "Full name is required" })
+    }
+    if (!role) {
+      return res.status(400).json({ message: "Role is required" })
+    }
+
+    // Check if external user exists (by email if provided, otherwise by name and company)
+    let existingUserQuery
+    let existingUserParams
+    if (email) {
+      existingUserQuery = "SELECT * FROM external_users WHERE email = $1"
+      existingUserParams = [email]
+    } else {
+      existingUserQuery = "SELECT * FROM external_users WHERE full_name = $1 AND company_name = $2"
+      existingUserParams = [full_name, company_name || null]
+    }
+    const existingUser = await pool.query(existingUserQuery, existingUserParams)
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ message: "External user already exists" })
+    }
+
+    // Only use fields present in frontend form, make company_name and address optional
+    const result = await pool.query(
+      `INSERT INTO external_users 
+       (full_name, company_name, email, phone, role, address) 
+       VALUES ($1, $2, $3, $4, $5, $6) 
+       RETURNING *`,
+      [
+        full_name,
+        company_name || null,
+        email || null,
+        phone || null,
+        role,
+        address || null
+      ]
+    )
+
+    res.status(201).json(result.rows[0])
+  } catch (error) {
+    console.error("Create external user error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Update external user
+app.put("/api/external-users/:id", authenticateToken, async (req, res) => {
+  try {
+    // Check permissions - only Admin and Farm Manager can update external users
+    if (!["Admin", "Farm Manager"].includes(req.user.role)) {
+      return res.status(403).json({ message: "You do not have permission to update external users" })
+    }
+
+    const userId = req.params.id
+    const { 
+      full_name, 
+      company_name, 
+      email, 
+      phone, 
+      role, 
+      specialization, 
+      contact_person, 
+      address, 
+      city, 
+      state, 
+      country, 
+      rating,
+      verified,
+      notes 
+    } = req.body
+
+    // Validation
+    if (!full_name) {
+      return res.status(400).json({ message: "Full name is required" })
+    }
+
+    const result = await pool.query(
+      `UPDATE external_users 
+       SET full_name = $1, company_name = $2, email = $3, phone = $4, role = $5, 
+           specialization = $6, contact_person = $7, address = $8, city = $9, 
+           state = $10, country = $11, rating = $12, verified = $13, notes = $14, 
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $15 
+       RETURNING *`,
+      [
+        full_name, company_name, email, phone, role, specialization, 
+        contact_person, address, city, state, country, rating, verified, notes, userId
+      ]
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "External user not found" })
+    }
+
+    res.json(result.rows[0])
+  } catch (error) {
+    console.error("Update external user error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+// Delete external user
+app.delete("/api/external-users/:id", authenticateToken, async (req, res) => {
+  try {
+    // Check permissions - only Admin and Farm Manager can delete external users
+    if (!["Admin", "Farm Manager"].includes(req.user.role)) {
+      return res.status(403).json({ message: "You do not have permission to delete external users" })
+    }
+
+    const userId = req.params.id
+    const result = await queryWithRetry(
+      "DELETE FROM external_users WHERE id = $1 RETURNING id",
+      [userId]
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "External user not found" })
+    }
+
+    res.json({ message: "External user deleted successfully" })
+  } catch (error) {
+    console.error("Delete external user error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
 // Start server
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`)
 })
