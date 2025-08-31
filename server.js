@@ -148,37 +148,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: 'Internal server error' });
 });
 
-// Database query wrapper with error handling
-const queryWithRetry = async (query, params = []) => {
-  const maxRetries = 3;
-  let retries = 0;
-  
-  while (retries < maxRetries) {
-    try {
-      const result = await pool.query(query, params);
-      return result;
-    } catch (err) {
-      retries++;
-      console.error(`Query attempt ${retries} failed:`, err.message);
-      
-      // If it's a connection error, try to reconnect
-      if (err.code === 'ECONNRESET' || err.message.includes('client_termination') || 
-          err.message.includes('Connection terminated')) {
-        
-        if (retries === maxRetries) {
-          throw new Error('Database connection lost and could not be restored');
-        }
-        
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000 * retries));
-        continue;
-      }
-      
-      // For other errors, throw immediately
-      throw err;
-    }
-  }
-};
 
 // Login endpoint with email verification check
 app.post("/api/auth/login", async (req, res) => {

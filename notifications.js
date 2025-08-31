@@ -5,14 +5,6 @@ const { sendPushToUser } = require('./push')
 const pool = require('./pool')
 require("dotenv").config()
 
-// // Test database connection
-// pool.connect((err, client, release) => {
-//   if (err) {
-//     console.error('❌ Database connection error:', err.stack);
-//   } else {
-//     release();
-//   }
-// });
 
 const emailer = nodemailer.createTransport({
     service: 'gmail', // Use lowercase 'gmail'
