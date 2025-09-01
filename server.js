@@ -660,14 +660,16 @@ app.get("/api/dashboard/tasks", authenticateToken, async (req, res) => {
 cron.schedule("0 0 * * *", async () => {
   try {
     // 1. Archive completed/missed static recurring tasks to task_history
+    // 1. Archive only completed static recurring tasks to task_history
     await pool.query(`
       INSERT INTO task_history (
         original_task_id, title, description, assigned_to, completion_date, completed_at, status, evidence_photo, completion_notes, priority, due_date, due_time
       )
       SELECT id, title, description, assigned_to, completed_at::date, completed_at, status, evidence_photo, completion_notes, priority, due_date, due_time
       FROM tasks
-      WHERE tag = 'static' AND recurrent = true AND (status = 'completed' OR (due_date < CURRENT_DATE AND status != 'completed'))
+      WHERE tag = 'static' AND recurrent = true AND status = 'completed'
     `);
+
 
     // 2. Archive overdue dynamic tasks to task_history and delete from tasks
     await pool.query(`
