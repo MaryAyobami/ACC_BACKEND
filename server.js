@@ -1,4 +1,5 @@
 
+
 const express = require("express")
 const cors = require("cors")
 const bcrypt = require("bcrypt")
@@ -15,7 +16,7 @@ const { saveSubscription } = require('./push')
 // ...existing code...
 // Initialize Express app
 const app = express()
-const port = process.env.PORT || 5000
+const port = process.env.PORT || 6000
 
 // Import notifications only if the file exists
 let notificationSystem = null;
@@ -190,11 +191,11 @@ app.post("/api/auth/login", async (req, res) => {
       })
     }
 
-    // Check if email is verified
-    if (!user.email_confirmed_at && !user.confirmed_at) {
+    // Check if user is approved
+    if (user.status !== 'approved') {
       return res.status(401).json({ 
-        message: "Please verify your email address before logging in. Check your inbox for a verification link.",
-        email_not_verified: true,
+        message: "Your account is pending admin approval.",
+        not_approved: true,
         user_email: email
       })
     }
@@ -269,40 +270,36 @@ app.post("/api/auth/register", async (req, res) => {
     // Hash password
     const password_hash = await bcrypt.hash(password, 12) // Increased salt rounds for better security
 
-    // Generate verification token
-    const crypto = require('crypto')
-    const verificationToken = crypto.randomBytes(32).toString('hex')
 
+    // Insert user with status 'pending'
     const result = await queryWithRetry(
-      `INSERT INTO users (full_name, email, phone, password_hash, role, confirmation_token, created_at) 
+      `INSERT INTO users (full_name, email, phone, password_hash, role, status, created_at) 
        VALUES ($1, $2, $3, $4, $5, $6, NOW()) 
-       RETURNING id, full_name, email, role`,
-      [full_name, email, phone || null, password_hash, role || 'Staff', verificationToken],
+       RETURNING id, full_name, email, role, status`,
+      [full_name, email, phone || null, password_hash, role || 'Staff', 'pending'],
     )
 
     const user = result.rows[0]
 
-    // Send verification email
+    // Notify admin of new registration
     if (notificationSystem) {
       try {
-        await notificationSystem.SimpleNotifications.sendVerificationEmail(user, verificationToken)
+        await notificationSystem.SimpleNotifications.sendAdminNewUserNotification(user);
       } catch (emailError) {
-        console.error('Failed to send verification email:', emailError)
-        // Don't fail registration if email fails, but log it
+        console.error('Failed to notify admin of new user:', emailError);
       }
     }
 
-    // Return success without token (user needs to verify email first)
     res.status(201).json({
-      message: "Registration successful. Please check your email to verify your account.",
+      message: "Registration successful. Your account is pending admin approval.",
       user: {
         id: user.id,
         full_name: user.full_name,
         email: user.email,
         role: user.role,
-        email_verified: false
+        status: user.status
       },
-      verification_required: true
+      approval_required: true
     })
   } catch (error) {
     console.error("Registration error:", error)
@@ -322,143 +319,46 @@ app.post("/api/auth/register", async (req, res) => {
   }
 })
 
-// Send verification email endpoint
-app.post("/api/auth/send-verification", async (req, res) => {
+// List users pending approval (admin only)
+app.get("/api/admin/pending-users", authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { email } = req.body
-    
-    if (!email) {
-      return res.status(400).json({ 
-        message: "Email is required",
-        field: "email"
-      })
+    const result = await queryWithRetry(
+      "SELECT id, full_name, email, role, created_at FROM users WHERE status = 'pending' ORDER BY created_at ASC"
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Get pending users error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Approve user (admin only)
+app.post("/api/admin/approve-user/:id", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    // Set status to approved
+    const result = await queryWithRetry(
+      "UPDATE users SET status = 'approved' WHERE id = $1 RETURNING id, full_name, email, role, status",
+      [userId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
     }
-    
-    // Email format validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ 
-        message: "Please enter a valid email address",
-        field: "email"
-      })
-    }
-    
-    // Check if user exists
-    const userResult = await queryWithRetry("SELECT * FROM users WHERE email = $1", [email])
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ 
-        message: "No account found with this email address",
-        field: "email"
-      })
-    }
-    
-    const user = userResult.rows[0]
-    
-    // Check if already verified
-    if (user.email_confirmed_at || user.confirmed_at) {
-      return res.status(400).json({ 
-        message: "This email is already verified"
-      })
-    }
-    
-    // Generate new verification token
-    const crypto = require('crypto')
-    const verificationToken = crypto.randomBytes(32).toString('hex')
-    
-    // Update token in database
-    await queryWithRetry(
-      "UPDATE users SET confirmation_token = $1, confirmation_sent_at = NOW() WHERE email = $2",
-      [verificationToken, email]
-    )
-    
-    // Send verification email
+    const user = result.rows[0];
+    // Send approval email to user
     if (notificationSystem) {
       try {
-        await notificationSystem.SimpleNotifications.sendVerificationEmail(user, verificationToken)
+        await notificationSystem.SimpleNotifications.sendApprovalEmail(user);
       } catch (emailError) {
-        console.error('Failed to send verification email:', emailError)
-        return res.status(500).json({ 
-          message: "Failed to send verification email. Please try again."
-        })
-      }
-    } else {
-    }
-    
-    res.json({ 
-      message: "Verification email sent successfully. Please check your inbox and spam folder."
-    })
-  } catch (error) {
-    console.error("Send verification error:", error)
-    res.status(500).json({ 
-      message: "Failed to send verification email. Please try again.",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    })
-  }
-})
-
-// Verify email endpoint
-app.post("/api/auth/verify-email", async (req, res) => {
-  try {
-    const { token } = req.body
-    
-    if (!token) {
-      return res.status(400).json({ 
-        message: "Verification token is required",
-        field: "token"
-      })
-    }
-    
-    // Find user with this token
-    const userResult = await queryWithRetry(
-      "SELECT * FROM users WHERE confirmation_token = $1 AND confirmation_token IS NOT NULL",
-      [token]
-    )
-    
-    if (userResult.rows.length === 0) {
-      return res.status(400).json({ 
-        message: "Invalid or expired verification token"
-      })
-    }
-    
-    const user = userResult.rows[0]
-    
-    // Check if token is expired (24 hours)
-    if (user.confirmation_sent_at) {
-      const tokenAge = Date.now() - new Date(user.confirmation_sent_at).getTime()
-      const twentyFourHours = 24 * 60 * 60 * 1000
-      
-      if (tokenAge > twentyFourHours) {
-        return res.status(400).json({ 
-          message: "Verification token has expired. Please request a new one.",
-          token_expired: true
-        })
+        console.error('Failed to send approval email:', emailError);
       }
     }
-    
-    // Verify the email
-    await queryWithRetry(
-      `UPDATE users SET 
-       email_confirmed_at = NOW(), 
-       confirmed_at = NOW(), 
-       confirmation_token = NULL, 
-       confirmation_sent_at = NULL 
-       WHERE id = $1`,
-      [user.id]
-    )
-    
-    
-    res.json({ 
-      message: "Email verified successfully! You can now log in to your account.",
-      verified: true
-    })
+    res.json({ message: "User approved and notified.", user });
   } catch (error) {
-    console.error("Email verification error:", error)
-    res.status(500).json({ 
-      message: "Email verification failed. Please try again.",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    })
+    console.error("Approve user error:", error);
+    res.status(500).json({ message: "Server error" });
   }
-})
+});
 
 // ...existing imports and setup...
 

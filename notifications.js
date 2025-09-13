@@ -9,19 +9,90 @@ require("dotenv").config()
 
 
 const emailer = nodemailer.createTransport({
-    service: 'gmail', // Use lowercase 'gmail'
+    host: 'mx4125.usc1.mymailhosting.com', 
     auth: {
-        user: 'ogunmolamaryayobami@gmail.com',
+        user: 'info@alliancecropcraft.com',
         pass: 'fgaemevgrrrnewle'
     },
-    // Add this for explicit configuration (optional)
-    host: 'smtp.gmail.com',
     port: 465,
-    secure: true // Use SSL/TLS for port 465
+    secure: true 
 });
-
 // Simple notification functions
 class SimpleNotifications {
+
+    // Send approval email to user
+    static async sendApprovalEmail(user) {
+        const mailOptions = {
+            from: 'info@alliancecropcraft.com',
+            to: user.email,
+            subject: 'Your Alliance CropCraft Account Has Been Approved',
+            html: `
+                <div style="max-width:600px;margin:0 auto;padding:20px;font-family:Arial,sans-serif;background-color:#f9f9f9;">
+                    <div style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);padding:30px;text-align:center;color:white;border-radius:10px 10px 0 0;">
+                        <h1 style="margin:0;font-size:24px;">Alliance CropCraft</h1>
+                        <p style="margin:10px 0 0 0;opacity:0.9;">Account Approved</p>
+                    </div>
+                    <div style="background:white;padding:30px;border-radius:0 0 10px 10px;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+                        <h2 style="color:#374151;margin-bottom:20px;">Congratulations, ${user.full_name}!</h2>
+                        <p style="color:#6b7280;line-height:1.6;margin-bottom:20px;">
+                            Your account has been approved by the admin. You can now log in and start using Alliance CropCraft.
+                        </p>
+                        <div style="background:#f3f4f6;padding:20px;border-radius:8px;margin:20px 0;">
+                            <p style="color:#6b7280;margin:0;font-size:14px;">
+                                <a href="${process.env.FRONTEND_URL || 'https://alliancecropcraft.vercel.app/login'}" style="color:#10b981;font-weight:bold;">Click here to log in</a>
+                            </p>
+                        </div>
+                        <div style="text-align:center;margin-top:20px;">
+                            <p style="color:#6b7280;font-size:14px;margin:0;">Best regards,<br><strong style="color:#10b981;">The Alliance CropCraft Team</strong></p>
+                        </div>
+                    </div>
+                </div>
+            `
+        };
+        try {
+            await emailer.sendMail(mailOptions);
+        } catch (error) {
+            console.error('❌ Failed to send approval email:', error);
+        }
+    }
+
+    // Notify admin of new user registration
+    static async sendAdminNewUserNotification(user) {
+        const adminEmail = process.env.ADMIN_EMAIL || 'ogunmolamaryayobami@gmail.com';
+        const mailOptions = {
+            from: 'info@alliancecropcraft.com',
+            to: adminEmail,
+            subject: 'New User Registration - Approval Required',
+            html: `
+                <div style="max-width:600px;margin:0 auto;padding:20px;font-family:Arial,sans-serif;background-color:#f9f9f9;">
+                    <div style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);padding:30px;text-align:center;color:white;border-radius:10px 10px 0 0;">
+                        <h1 style="margin:0;font-size:24px;">Alliance CropCraft</h1>
+                        <p style="margin:10px 0 0 0;opacity:0.9;">Admin Notification</p>
+                    </div>
+                    <div style="background:white;padding:30px;border-radius:0 0 10px 10px;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+                        <h2 style="color:#374151;margin-bottom:20px;">New User Registration</h2>
+                        <p style="color:#6b7280;line-height:1.6;margin-bottom:20px;">
+                            A new user has registered and is awaiting your approval.<br><br>
+                            <strong>Name:</strong> ${user.full_name}<br>
+                            <strong>Email:</strong> ${user.email}<br>
+                            <strong>Role:</strong> ${user.role}<br>
+                            <strong>User ID:</strong> ${user.id}
+                        </p>
+                        <div style="background:#f3f4f6;padding:20px;border-radius:8px;margin:20px 0;">
+                            <p style="color:#6b7280;margin:0;font-size:14px;">
+                                Please review and approve this user in the admin dashboard.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `
+        };
+        try {
+            await emailer.sendMail(mailOptions);
+        } catch (error) {
+            console.error('❌ Failed to send admin new user notification:', error);
+        }
+    }
     
     // Send morning summary at 7 AM
     static setupDailySummary() {
@@ -284,75 +355,6 @@ static async sendOverdueAlert(user, task) {
     }
 }
 
-    // Send verification email
-    static async sendVerificationEmail(user, token) {
-    const verificationUrl = `${process.env.FRONTEND_URL || 'https://alliancecropcraft.vercel.app'}/verify-email?token=${token}`;
-        
-        const mailOptions = {
-            from: 'ogunmolamaryayobami@gmail.com',
-            to: user.email,
-            subject: 'Verify Your Alliance CropCraft Account',
-            html: `
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif; background-color: #f9f9f9;">
-                    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; text-align: center; color: white; border-radius: 10px 10px 0 0;">
-                        <h1 style="margin: 0; font-size: 24px;">Alliance CropCraft</h1>
-                        <p style="margin: 10px 0 0 0; opacity: 0.9;">Farm Management System</p>
-                    </div>
-                    
-                    <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                        <h2 style="color: #374151; margin-bottom: 20px;">Welcome ${user.full_name}!</h2>
-                        
-                        <p style="color: #6b7280; line-height: 1.6; margin-bottom: 20px;">
-                            Thank you for registering with Alliance CropCraft. To complete your account setup and start managing your farm operations, please verify your email address.
-                        </p>
-                        
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="${verificationUrl}" 
-                               style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
-                                      color: white; 
-                                      padding: 15px 30px; 
-                                      text-decoration: none; 
-                                      border-radius: 8px; 
-                                      font-weight: bold; 
-                                      display: inline-block;
-                                      box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);">
-                                Verify My Email
-                            </a>
-                        </div>
-                        
-                        <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                            <p style="color: #6b7280; margin: 0; font-size: 14px;">
-                                <strong>Can't click the button?</strong><br>
-                                Copy and paste this link into your browser:<br>
-                                <span style="word-break: break-all; color: #10b981;">${verificationUrl}</span>
-                            </p>
-                        </div>
-                        
-                        <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
-                            <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-                                This verification link will expire in 24 hours for security reasons.<br>
-                                If you didn't create this account, please ignore this email.
-                            </p>
-                        </div>
-                        
-                        <div style="text-align: center; margin-top: 20px;">
-                            <p style="color: #6b7280; font-size: 14px; margin: 0;">
-                                Best regards,<br>
-                                <strong style="color: #10b981;">The Alliance CropCraft Team</strong>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            `
-        };
-
-        try {
-            await emailer.sendMail(mailOptions);
-        } catch (error) {
-            console.error(`❌ Failed to send verification email to ${user.email}:`, error);
-            throw error;
-        }
-    }
 
     // Send password reset email
     static async sendPasswordResetEmail(user, resetToken) {
